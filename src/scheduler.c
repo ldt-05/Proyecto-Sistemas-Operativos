@@ -21,7 +21,6 @@
 #include "../include/scheduler.h"
 
 #define ESPERA_POLL_US 5000
-#define SEPARADORES " \t\r"
 #define GANTT_IDLE -1
 #define SIN_PROCESO -1
 
@@ -54,9 +53,13 @@ static pthread_t hilo_motor;
 
 // ---------------------------- Planificacion ----------------------------
 
-static void encolar_listo(int i) {
+void motor_encolar_listo(int i) {
     procesos[i].estado = LISTO;
     procesos[i].orden_listo = ++ultimo_orden;
+}
+
+static void encolar_listo(int i) {
+    motor_encolar_listo(i);
 }
 
 // NUEVO -> LISTO cuando el reloj alcanza la llegada. Si un proceso se creo a mitad
@@ -120,6 +123,7 @@ static void despachar(void) {
     quantum_usado = 0;
     if (!p->ha_iniciado) {
         p->ha_iniciado = true;
+        p->tiempo_inicio = clock_ticks;
         p->tiempo_respuesta = clock_ticks - p->tiempo_llegada;
     }
 }
@@ -263,23 +267,20 @@ static bool parsear_entero(const char* texto, int* valor) {
     return true;
 }
 
-static const char* siguiente_arg(void) {
-    return strtok(NULL, SEPARADORES);
-}
-
-static void cmd_set_sched(void) {
-    const char* nombre = siguiente_arg();
-    const char* texto_quantum = siguiente_arg();
+static void cmd_set_sched(int token_count, char* tokens[]) {
     const char* uso = "Uso correcto: set_sched <RR|SRTF> [quantum]";
 
-    if (nombre == NULL) {
+    if (token_count < 2) {
         printf("[ERROR DE SINTAXIS]: Parámetros insuficientes.\n%s\n", uso);
         return;
     }
-    if (siguiente_arg() != NULL) {
+    if (token_count > 3) {
         printf("[ERROR DE SINTAXIS]: Demasiados parámetros.\n%s\n", uso);
         return;
     }
+
+    const char* nombre = tokens[1];
+    const char* texto_quantum = (token_count == 3) ? tokens[2] : NULL;
 
     Algoritmo nuevo;
     int nuevo_quantum = 2;
@@ -319,21 +320,20 @@ static void cmd_set_sched(void) {
     }
 }
 
-static void cmd_set_speed(void) {
-    const char* texto = siguiente_arg();
+static void cmd_set_speed(int token_count, char* tokens[]) {
     const char* uso = "Uso correcto: set_speed <ms_por_tick>";
 
-    if (texto == NULL) {
+    if (token_count < 2) {
         printf("[ERROR DE SINTAXIS]: Parámetros insuficientes.\n%s\n", uso);
         return;
     }
-    if (siguiente_arg() != NULL) {
+    if (token_count > 2) {
         printf("[ERROR DE SINTAXIS]: Demasiados parámetros.\n%s\n", uso);
         return;
     }
 
     int ms;
-    if (!parsear_entero(texto, &ms)) {
+    if (!parsear_entero(tokens[1], &ms)) {
         printf("[ERROR DE TIPO]: La velocidad debe ser un número entero.\n");
         return;
     }
@@ -405,36 +405,40 @@ static void cmd_stats(void) {
         }
     }
 
-    // Espera y retorno promedian los finalizados; respuesta, los que ya tocaron la CPU.
+    // Formato exacto según la rúbrica oficial
     printf("ESTADÍSTICAS DEL SISTEMA:\n");
-    printf("- Procesos Finalizados       : %d / %d\n", finalizados, num_procesos);
-    printf("- Tiempo Promedio de Espera  : %.2f ticks\n",
+    printf("Procesos Finalizados       : %d/%d\n", finalizados, num_procesos);
+    printf("Tiempo Promedio de Espera  : %.2f ticks\n",
            finalizados ? (double)suma_espera / finalizados : 0.0);
-    printf("- Tiempo Promedio de Retorno : %.2f ticks\n",
+    printf("Tiempo Promedio de Retorno : %.2f ticks\n",
            finalizados ? (double)suma_retorno / finalizados : 0.0);
-    printf("- Tiempo Promedio de Respuesta: %.2f ticks\n",
+    printf("Tiempo Promedio de Respuesta: %.2f ticks\n",
            iniciados ? (double)suma_respuesta / iniciados : 0.0);
-    printf("- Uso de CPU                 : %.1f%%\n",
+    printf("Uso de CPU                 : %.1f%%\n",
            clock_ticks ? 100.0 * ticks_ocupados / clock_ticks : 0.0);
     pthread_mutex_unlock(&mutex_sistema);
 }
 
 // Para los comandos sin parametros: ejecuta solo si no sobran argumentos.
-static void sin_argumentos(const char* comando, void (*accion)(void)) {
-    if (siguiente_arg() != NULL) {
-        printf("[ERROR DE SINTAXIS]: El comando '%s' no recibe parámetros.\n", comando);
+static void sin_argumentos(int token_count, char* tokens[], void (*accion)(void)) {
+    if (token_count > 1) {
+        printf("[ERROR DE SINTAXIS]: El comando '%s' no recibe parámetros.\n", tokens[0]);
         return;
     }
     accion();
 }
 
-bool comando_motor(const char* comando) {
-    if (strcmp(comando, "set_sched") == 0) cmd_set_sched();
-    else if (strcmp(comando, "set_speed") == 0) cmd_set_speed();
-    else if (strcmp(comando, "start") == 0) sin_argumentos(comando, cmd_start);
-    else if (strcmp(comando, "pause") == 0) sin_argumentos(comando, cmd_pause);
-    else if (strcmp(comando, "gantt") == 0) sin_argumentos(comando, cmd_gantt);
-    else if (strcmp(comando, "stats") == 0) sin_argumentos(comando, cmd_stats);
+bool comando_motor(int token_count, char* tokens[]) {
+    if (token_count < 1) return false;
+    const char* comando = tokens[0];
+
+    if (strcmp(comando, "set_sched") == 0) cmd_set_sched(token_count, tokens);
+    else if (strcmp(comando, "set_speed") == 0) cmd_set_speed(token_count, tokens);
+    else if (strcmp(comando, "start") == 0) sin_argumentos(token_count, tokens, cmd_start);
+    else if (strcmp(comando, "pause") == 0) sin_argumentos(token_count, tokens, cmd_pause);
+    else if (strcmp(comando, "gantt") == 0) sin_argumentos(token_count, tokens, cmd_gantt);
+    else if (strcmp(comando, "stats") == 0) sin_argumentos(token_count, tokens, cmd_stats);
     else return false;
+
     return true;
 }

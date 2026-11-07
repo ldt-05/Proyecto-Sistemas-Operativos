@@ -29,12 +29,23 @@ static void agregar(const char* nombre, int burst, int prioridad, int llegada) {
     pthread_mutex_unlock(&mutex_sistema);
 }
 
-// Igual que la CLI: strtok separa el comando y comando_motor lee el resto.
+// Tokeniza la línea y despacha al motor de la misma forma que la CLI
 static bool cmd(const char* linea) {
     char buf[256];
-    strcpy(buf, linea);
+    strncpy(buf, linea, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
     printf("SO-Shell> %s\n", linea);
-    return comando_motor(strtok(buf, " "));
+
+    char* tokens[16];
+    int count = 0;
+    char* tok = strtok(buf, " \t\r\n");
+    while (tok != NULL && count < 16) {
+        tokens[count++] = tok;
+        tok = strtok(NULL, " \t\r\n");
+    }
+    if (count == 0) return false;
+
+    return comando_motor(count, tokens);
 }
 
 static void reiniciar(void) {
@@ -108,7 +119,7 @@ static void prueba_errores(void) {
     VERIFICAR(quantum == 2);
     VERIFICAR(velocidad_ms == 50);
     VERIFICAR(!motor_corriendo);
-    VERIFICAR(!comando_motor("otro"));
+    VERIFICAR(!comando_motor(1, (char*[]){"otro"}));
 
     cmd("set_sched RR");
     VERIFICAR(quantum == 2);

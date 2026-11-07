@@ -4,7 +4,12 @@
 #include <pthread.h>
 #include <stdbool.h>
 
-// Estados del proceso definidos en la rúbrica
+#define MAX_PROCESOS 100
+#define MAX_NOMBRE_LEN 20
+
+// ==========================================
+// ESTADOS DEL PROCESO
+// ==========================================
 typedef enum {
     NUEVO,
     LISTO,
@@ -13,30 +18,42 @@ typedef enum {
     FINALIZADO
 } ProcessState;
 
-// Process Control Block (PCB)
+// ==========================================
+// PROCESS CONTROL BLOCK (PCB)
+// ==========================================
 typedef struct {
-    int pid;
-    char nombre[20];
-    ProcessState estado;
-    int burst_inicial;
-    int burst_restante;
-    int prioridad;
-    int tiempo_llegada;
-    int tiempo_espera;
-    int tiempo_retorno;
-    int tiempo_respuesta;
-    int tiempo_finalizacion;
-    bool ha_iniciado;   // Ya paso por la CPU (para el tiempo de respuesta)
-    int orden_listo;    // Posicion en la cola de LISTOS (el menor sale primero)
+    int pid;                            // Identificador único (1, 2, 3...)
+    char nombre[MAX_NOMBRE_LEN];        // Nombre del proceso sin espacios
+    ProcessState estado;                // Estado actual en el ciclo de vida
+    int burst_inicial;                  // Ráfaga de CPU original solicitada
+    int burst_restante;                 // Ráfaga que le falta consumir
+    int prioridad;                      // Prioridad (1: más alta, 5: más baja)
+    int tiempo_llegada;                 // Tick en el que ingresó al sistema (AT)
+    int tiempo_espera;                  // Ticks acumulados esperando en cola LISTO (WT)
+    int tiempo_retorno;                 // TAT = CT - AT (solo cuando finaliza)
+    int tiempo_respuesta;               // RT = primer_tick_cpu - AT
+    int tiempo_finalizacion;            // Tick en el que burst_restante llegó a 0 (CT)
+    int tiempo_inicio;                  // Tick de la primera vez en CPU
+    bool ha_iniciado;                   // Indica si ya pisó la CPU alguna vez
+    int orden_listo;                    // Posición en la cola de LISTOS para desempate FIFO
 } PCB;
 
-// Variables Globales Compartidas (Declaración)
-extern PCB procesos[100]; // Arreglo estático temporal como cola
-extern int num_procesos;
-extern bool simulador_activo; // Bandera para el Hilo CLI
-extern int clock_ticks;       // Reloj simulado (definido en scheduler.c)
+// ==========================================
+// VARIABLES GLOBALES COMPARTIDAS
+// ==========================================
+extern PCB procesos[MAX_PROCESOS];      // Tabla global de procesos
+extern int num_procesos;                // Cantidad total de procesos registrados
+extern bool simulador_activo;           // Control de vida del sistema (true = activo)
+extern int clock_ticks;                 // Reloj maestro simulado de la CPU
+extern pthread_mutex_t mutex_sistema;   // Candado de exclusión mutua
 
-// Mutex para proteger la lectura y escritura de las estructuras compartidas
-extern pthread_mutex_t mutex_sistema;
+// ==========================================
+// PROTOTIPOS DE FUNCIONES BASE
+// ==========================================
+// Función principal del Hilo de la Interfaz de Usuario (Luis)
+void* HiloCLI(void* arg);
 
-#endif
+// Función utilitaria para convertir el enum ProcessState a texto legible
+const char* estado_a_string(ProcessState estado);
+
+#endif // OS_CORE_H
