@@ -3,6 +3,7 @@
 #include <string.h>
 #include <pthread.h>
 #include "../include/os_core.h"
+#include "../include/scheduler.h"
 
 // Función del Hilo CLI
 void* HiloCLI(void* arg) {
@@ -48,6 +49,9 @@ void* HiloCLI(void* arg) {
                 // TODO: Iterar e imprimir procesos
             }
             pthread_mutex_unlock(&mutex_sistema);
+        }
+        else if (comando_motor(comando)) {
+            // Atendido por el motor: set_sched, set_speed, start, pause, gantt, stats
         }
         else {
             // Validación estricta: No colapsar si el comando no existe
