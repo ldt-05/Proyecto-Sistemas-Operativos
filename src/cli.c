@@ -115,6 +115,7 @@ static void ejecutar_create(int token_count, char* tokens[]) {
     procesos[idx].pid = siguiente_pid++;
     strncpy(procesos[idx].nombre, nombre, MAX_NOMBRE_LEN - 1);
     procesos[idx].nombre[MAX_NOMBRE_LEN - 1] = '\0';
+    procesos[idx].estado = LISTO;
     procesos[idx].burst_inicial = burst;
     procesos[idx].burst_restante = burst;
     procesos[idx].prioridad = prioridad;
@@ -125,7 +126,6 @@ static void ejecutar_create(int token_count, char* tokens[]) {
     procesos[idx].ha_iniciado = false;
     procesos[idx].tiempo_inicio = -1;
     procesos[idx].tiempo_finalizacion = -1;
-    motor_encolar_listo(idx); // Asigna estado = LISTO y orden_listo secuencial para desempate FIFO
 
     num_procesos++;
 
@@ -314,7 +314,7 @@ void* HiloCLI(void* arg) {
 
         char* cmd = tokens[0];
 
-        // 1. Comandos de Luis (40%)
+        // Despacho de Comandos asignados a Luis (40%)
         if (strcmp(cmd, "create") == 0) {
             ejecutar_create(token_count, tokens);
         } else if (strcmp(cmd, "ps") == 0) {
@@ -327,13 +327,15 @@ void* HiloCLI(void* arg) {
             ejecutar_exit(token_count);
             break;
         }
-        // 2. Comandos del Motor de CPU (Renzo - 40%)
-        else if (comando_motor(token_count, tokens)) {
-            // Atendido por el motor: set_sched, set_speed, start, pause, gantt, stats
-        }
-        // 3. Comandos de Carga por Lotes (Juan - 20%)
-        else if (strcmp(cmd, "load") == 0) {
-            printf("[MODULO PENDIENTE]: El comando 'load' pertenece al módulo de Carga por Lotes (Juan).\n");
+        // Identificadores de comandos reservados para Renzo y Juan
+        else if (strcmp(cmd, "load") == 0 ||
+                 strcmp(cmd, "set_sched") == 0 ||
+                 strcmp(cmd, "set_speed") == 0 ||
+                 strcmp(cmd, "start") == 0 ||
+                 strcmp(cmd, "pause") == 0 ||
+                 strcmp(cmd, "gantt") == 0 ||
+                 strcmp(cmd, "stats") == 0) {
+            printf("[MODULO PENDIENTE]: El comando '%s' pertenece al módulo de Planificación / Lotes (Renzo / Juan).\n", cmd);
         } else {
             // Validación estricta ante comandos desconocidos
             printf("[ERROR DE SINTAXIS]: Comando '%s' no reconocido. Escribe 'help' para ver comandos válidos.\n", cmd);
