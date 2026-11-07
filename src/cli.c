@@ -5,6 +5,7 @@
 #include <limits.h>
 #include <pthread.h>
 #include "../include/os_core.h"
+#include "../include/scheduler.h"
 
 #define MAX_LINE_LEN 256
 #define MAX_TOKENS 16

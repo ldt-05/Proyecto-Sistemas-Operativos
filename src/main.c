@@ -1,7 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include "../include/os_core.h"
+#include "../include/scheduler.h"
 
 // ==========================================
 // DEFINICIÓN DE VARIABLES GLOBALES
@@ -14,6 +18,10 @@ pthread_mutex_t mutex_sistema;
 
 int main() {
     pthread_t hilo_cli;
+
+#ifdef _WIN32
+    SetConsoleOutputCP(CP_UTF8);  // Soporte de acentos y caracteres UTF-8 en PowerShell / CMD
+#endif
 
     // Inicializar el Mutex principal
     if (pthread_mutex_init(&mutex_sistema, NULL) != 0) {
