@@ -156,6 +156,50 @@ static void gantt_registrar(int indice, int inicio) {
     gantt[gantt_len++] = (SegmentoGantt){indice, inicio, inicio + 1};
 }
 
+/*
+ * Copia los ultimos segmentos del historial de Gantt.
+ *
+ * Convierte los indices internos del planificador
+ * en identificadores PID para la interfaz grafica.
+ *
+ * El llamador debe mantener bloqueado mutex_sistema.
+ */
+int motor_copiar_gantt(GanttVista* destino, int capacidad) {
+
+    if (destino == NULL || capacidad <= 0) {
+        return 0;
+    }
+
+    // Conservar solo los segmentos mas recientes.
+    int inicio = gantt_len > capacidad
+        ? gantt_len - capacidad
+        : 0;
+
+    int copiados = 0;
+
+    for (int i = inicio; i < gantt_len; i++) {
+
+        const SegmentoGantt* segmento = &gantt[i];
+
+        // -1 representa un intervalo de CPU inactiva.
+        int pid = -1;
+
+        if (segmento->indice >= 0 &&
+            segmento->indice < num_procesos) {
+
+            pid = procesos[segmento->indice].pid;
+        }
+
+        destino[copiados++] = (GanttVista) {
+            .pid = pid,
+            .inicio = segmento->inicio,
+            .fin = segmento->fin
+        };
+    }
+
+    return copiados;
+}
+
 // ----------------------------- Hilo Motor ------------------------------
 
 static long long ahora_ms(void) {
