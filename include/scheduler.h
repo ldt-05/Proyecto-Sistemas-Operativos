@@ -3,6 +3,29 @@
 
 #include <stdbool.h>
 
+/*
+ * Segmento del historial de CPU disponible
+ * para la interfaz grafica.
+ *
+ * El PID -1 representa tiempo de CPU inactiva.
+ */
+typedef struct {
+    int pid;
+    int inicio;
+    int fin;
+} GanttVista;
+
+/*
+ * Copia los ultimos segmentos del historial.
+ *
+ * El llamador debe mantener bloqueado
+ * mutex_sistema durante la operacion.
+ */
+int motor_copiar_gantt(
+    GanttVista* destino,
+    int capacidad
+);
+
 // Crea el Hilo Motor de CPU. Devuelve false si no se pudo crear.
 bool motor_iniciar(void);
 
