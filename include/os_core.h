@@ -37,6 +37,7 @@ typedef struct {
     bool ha_iniciado;                   // Indica si ya pisó la CPU alguna vez
     int tiempo_inicio;                  // Tick de la primera vez en CPU
     int tiempo_finalizacion;            // Tick en el que burst_restante llegó a 0 (CT)
+    int orden_listo;                    // Orden FIFO utilizado por el planificador
 } PCB;
 
 // ==========================================
