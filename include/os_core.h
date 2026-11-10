@@ -32,10 +32,12 @@ typedef struct {
     int tiempo_espera;                  // Ticks acumulados esperando en cola LISTO (WT)
     int tiempo_retorno;                 // TAT = CT - AT (solo cuando finaliza)
     int tiempo_respuesta;               // RT = primer_tick_cpu - AT
-    int tiempo_finalizacion;            // Tick en el que burst_restante llegó a 0 (CT)
-    int tiempo_inicio;                  // Tick de la primera vez en CPU
+    
+    // Campos auxiliares para cálculo exacto de métricas
     bool ha_iniciado;                   // Indica si ya pisó la CPU alguna vez
-    int orden_listo;                    // Posición en la cola de LISTOS para desempate FIFO
+    int tiempo_inicio;                  // Tick de la primera vez en CPU
+    int tiempo_finalizacion;            // Tick en el que burst_restante llegó a 0 (CT)
+    int orden_listo;                    // Orden FIFO utilizado por el planificador
 } PCB;
 
 // ==========================================
