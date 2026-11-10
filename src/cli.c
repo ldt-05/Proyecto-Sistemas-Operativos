@@ -3,6 +3,8 @@
 #include <string.h>
 #include <stdbool.h>
 #include <limits.h>
+#include <ctype.h>
+#include <errno.h>
 #include <pthread.h>
 #include "../include/os_core.h"
 #include "../include/scheduler.h"
@@ -34,7 +36,13 @@ static bool parse_int(const char* str, int* out_val) {
         return false;
     }
     char* endptr = NULL;
+    
+    errno = 0;
     long val = strtol(str, &endptr, 10);
+
+    if (errno == ERANGE) {
+        return false;
+    }
 
     // Si endptr apunta a algo distinto del fin de cadena, contenía letras o símbolos
     if (*endptr != '\0') {
@@ -59,6 +67,24 @@ static int tokenizar_linea(char* linea, char* tokens[], int max_tokens) {
         token = strtok(NULL, " \t\r\n");
     }
     return count;
+}
+
+
+// Obtiene el siguiente PID disponible en la tabla de procesos.
+static int siguiente_pid_libre(void) {
+    int mayor_pid = 0;
+
+    for (int i = 0; i < num_procesos; i++) {
+        if (procesos[i].pid > mayor_pid) {
+            mayor_pid = procesos[i].pid;
+        }
+    }
+
+    if (mayor_pid == INT_MAX) {
+        return 0;
+    }
+
+    return mayor_pid + 1;
 }
 
 // ============================================================================
@@ -109,10 +135,17 @@ static void ejecutar_create(int token_count, char* tokens[]) {
         return;
     }
 
-    static int siguiente_pid = 1; // Generador de PID autoincremental
+    
+    int nuevo_pid = siguiente_pid_libre();
+
+    if (nuevo_pid == 0) {
+        printf("[ERROR DEL SISTEMA]: No hay PID disponibles.\n");
+        pthread_mutex_unlock(&mutex_sistema);
+        return;
+    }
 
     int idx = num_procesos;
-    procesos[idx].pid = siguiente_pid++;
+    procesos[idx].pid = nuevo_pid;
     strncpy(procesos[idx].nombre, nombre, MAX_NOMBRE_LEN - 1);
     procesos[idx].nombre[MAX_NOMBRE_LEN - 1] = '\0';
     procesos[idx].estado = LISTO;
@@ -268,6 +301,437 @@ static void ejecutar_exit(int token_count) {
     pthread_mutex_unlock(&mutex_sistema);
 
     printf("Cerrando el sistema de forma limpia...\n");
+}
+
+ // ============================================================================
+ // COMANDO DE CARGA POR LOTES (JUAN)
+ // ============================================================================
+
+#define MAX_LINEA_LOTE 512
+#define CAMPOS_LOTE 4
+
+// Datos temporales de un proceso antes de incorporarlo al sistema.
+typedef struct {
+    char nombre[MAX_NOMBRE_LEN];
+    int burst;
+    int prioridad;
+    int llegada;
+} RegistroLote;
+
+// Identificadores de las columnas del archivo.
+enum {
+    COL_NOMBRE,
+    COL_BURST,
+    COL_PRIORIDAD,
+    COL_LLEGADA
+};
+
+// Identifica los encabezados admitidos por el parser.
+static int columna_lote(const char* texto) {
+    char etiqueta[64];
+    size_t len = strlen(texto);
+
+    if (len >= sizeof(etiqueta)) {
+        return -1;
+    }
+
+    for (size_t i = 0; i < len; i++) {
+        etiqueta[i] = (char)tolower((unsigned char)texto[i]);
+    }
+    etiqueta[len] = '\0';
+
+    if (strcmp(etiqueta, "nombre") == 0 ||
+        strcmp(etiqueta, "name") == 0 ||
+        strcmp(etiqueta, "proceso") == 0 ||
+        strcmp(etiqueta, "process") == 0) {
+        return COL_NOMBRE;
+    }
+
+    if (strcmp(etiqueta, "burst") == 0 ||
+        strcmp(etiqueta, "burst_time") == 0 ||
+        strcmp(etiqueta, "rafaga") == 0) {
+        return COL_BURST;
+    }
+
+    if (strcmp(etiqueta, "prioridad") == 0 ||
+        strcmp(etiqueta, "priority") == 0) {
+        return COL_PRIORIDAD;
+    }
+
+    if (strcmp(etiqueta, "tiempo_llegada") == 0 ||
+        strcmp(etiqueta, "arrival") == 0 ||
+        strcmp(etiqueta, "arrival_time") == 0 ||
+        strcmp(etiqueta, "llegada") == 0) {
+        return COL_LLEGADA;
+    }
+
+    return -1;
+}
+
+// Elimina espacios al principio y al final de un texto.
+static char* quitar_espacios(char* str) {
+    while (isspace((unsigned char)*str)) {
+        str++;
+    }
+
+    char* fin = str + strlen(str);
+
+    while (fin > str &&
+           isspace((unsigned char)fin[-1])) {
+        *--fin = '\0';
+    }
+
+    return str;
+}
+
+// Divide una línea CSV en cuatro campos obligatorios.
+// Se conservan los campos vacíos para detectar errores.
+static bool separar_csv_lote(
+    char* linea,
+    char* campos[CAMPOS_LOTE]
+) {
+    char* cursor = linea;
+
+    for (int i = 0; i < CAMPOS_LOTE; i++) {
+        campos[i] = cursor;
+        char* coma = strchr(cursor, ',');
+
+        if (i < CAMPOS_LOTE - 1) {
+            if (coma == NULL) {
+                return false;
+            }
+
+            *coma = '\0';
+            cursor = coma + 1;
+        } else if (coma != NULL) {
+            return false;
+        }
+
+        campos[i] = quitar_espacios(campos[i]);
+
+        if (*campos[i] == '\0') {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// Valida los campos y construye un registro temporal.
+static bool interpretar_registro_lote(
+    char* campos[CAMPOS_LOTE],
+    const int posiciones[CAMPOS_LOTE],
+    RegistroLote* registro
+) {
+    const char* nombre = campos[posiciones[COL_NOMBRE]];
+    size_t longitud = strlen(nombre);
+
+    // Validar nombre del proceso.
+    if (longitud == 0 || longitud >= MAX_NOMBRE_LEN) {
+        return false;
+    }
+
+    for (size_t i = 0; i < longitud; i++) {
+        if (isspace((unsigned char)nombre[i])) {
+            return false;
+        }
+    }
+
+    // Validar duración de CPU.
+    if (!parse_int(
+            campos[posiciones[COL_BURST]],
+            &registro->burst) ||
+        registro->burst <= 0) {
+        return false;
+    }
+
+    // Validar prioridad entre 1 y 5.
+    if (!parse_int(
+            campos[posiciones[COL_PRIORIDAD]],
+            &registro->prioridad) ||
+        registro->prioridad < 1 ||
+        registro->prioridad > 5) {
+        return false;
+    }
+
+    // Validar tiempo de llegada no negativo.
+    if (!parse_int(
+            campos[posiciones[COL_LLEGADA]],
+            &registro->llegada) ||
+        registro->llegada < 0) {
+        return false;
+    }
+
+    strcpy(registro->nombre, nombre);
+
+    return true;
+}
+
+/*
+ * Comando: load <archivo>
+ *
+ * Lee un archivo CSV y registra procesos masivamente.
+ * Primero valida todo el lote para evitar cargas parciales.
+ * Los procesos se registran como NUEVO y el motor los
+ * admite cuando alcanza su tiempo de llegada.
+ */
+static void ejecutar_load(int token_count, char* tokens[]) {
+
+    // 1. Validar la sintaxis del comando.
+    if (token_count != 2) {
+        printf("[ERROR DE SINTAXIS]: Uso correcto: load <archivo.txt>\n");
+        return;
+    }
+
+    // 2. Abrir el archivo indicado.
+    FILE* archivo = fopen(tokens[1], "r");
+
+    if (archivo == NULL) {
+        printf("[ERROR DE ARCHIVO]: No se pudo abrir '%s'.\n",
+               tokens[1]);
+        return;
+    }
+
+    // 3. Preparar almacenamiento temporal.
+    RegistroLote lote[MAX_PROCESOS];
+    int total = 0;
+    int linea_num = 0;
+
+    // Orden predeterminado de las columnas.
+    int posiciones[CAMPOS_LOTE] = {0, 1, 2, 3};
+
+    bool primera_fila = true;
+    bool valido = true;
+    char linea[MAX_LINEA_LOTE];
+
+    // 4. Leer el archivo linea por linea.
+    while (fgets(linea, sizeof(linea), archivo) != NULL) {
+        linea_num++;
+
+        size_t longitud = strlen(linea);
+
+        // Detectar lineas demasiado largas.
+        if (longitud > 0 &&
+            linea[longitud - 1] != '\n' &&
+            !feof(archivo)) {
+
+            printf("[ERROR DE FORMATO]: Linea %d demasiado larga.\n",
+                   linea_num);
+
+            valido = false;
+            break;
+        }
+
+        char* texto = linea;
+
+        // Ignorar BOM UTF-8 si existe.
+        if (linea_num == 1 && longitud >= 3 &&
+            (unsigned char)linea[0] == 0xEF &&
+            (unsigned char)linea[1] == 0xBB &&
+            (unsigned char)linea[2] == 0xBF) {
+
+            texto += 3;
+        }
+
+        texto = quitar_espacios(texto);
+
+        // Ignorar lineas vacias y comentarios.
+        if (*texto == '\0' || *texto == '#') {
+            continue;
+        }
+
+        // 5. Separar los campos del CSV.
+        char* campos[CAMPOS_LOTE];
+
+        if (!separar_csv_lote(texto, campos)) {
+            printf("[ERROR DE FORMATO]: Linea %d. "
+                   "Se requieren cuatro campos CSV.\n",
+                   linea_num);
+
+            valido = false;
+            break;
+        }
+
+        // 6. Reconocer un posible encabezado.
+        if (primera_fila) {
+            primera_fila = false;
+
+            int reconocidas = 0;
+            int nuevas_posiciones[CAMPOS_LOTE] = {
+                -1, -1, -1, -1
+            };
+
+            for (int i = 0; i < CAMPOS_LOTE; i++) {
+                int col = columna_lote(campos[i]);
+
+                if (col >= 0) {
+                    reconocidas++;
+
+                    if (nuevas_posiciones[col] != -1) {
+                        printf("[ERROR DE FORMATO]: "
+                               "Columnas repetidas en linea %d.\n",
+                               linea_num);
+
+                        valido = false;
+                        break;
+                    }
+
+                    nuevas_posiciones[col] = i;
+                }
+            }
+
+            if (!valido) {
+                break;
+            }
+
+            if (reconocidas >= 2) {
+                if (reconocidas != CAMPOS_LOTE) {
+                    printf("[ERROR DE FORMATO]: "
+                           "Encabezado incompleto en linea %d.\n",
+                           linea_num);
+
+                    valido = false;
+                    break;
+                }
+
+                memcpy(posiciones, nuevas_posiciones,
+                       sizeof(posiciones));
+
+                continue;
+            }
+        }
+
+        // 7. Verificar capacidad del lote.
+        if (total >= MAX_PROCESOS) {
+            printf("[ERROR]: El lote supera el limite "
+                   "de %d procesos.\n", MAX_PROCESOS);
+
+            valido = false;
+            break;
+        }
+
+        // 8. Validar y guardar el registro temporal.
+        if (!interpretar_registro_lote(
+                campos, posiciones, &lote[total])) {
+
+            printf("[ERROR DE VALIDACION]: Linea %d. "
+                   "Verifique nombre, burst, "
+                   "prioridad y tiempo de llegada.\n",
+                   linea_num);
+
+            valido = false;
+            break;
+        }
+
+        total++;
+    }
+
+    // 9. Comprobar errores de lectura.
+    if (ferror(archivo)) {
+        printf("[ERROR DE ARCHIVO]: Fallo la lectura de '%s'.\n",
+               tokens[1]);
+
+        valido = false;
+    }
+
+    fclose(archivo);
+
+    // No insertar procesos si el lote tiene errores.
+    if (!valido) {
+        printf("[CARGA CANCELADA]: No se agregaron procesos.\n");
+        return;
+    }
+
+    if (total == 0) {
+        printf("[ERROR]: El archivo no contiene procesos.\n");
+        return;
+    }
+
+    // 10. Ordenar por tiempo de llegada.
+    // El orden original se conserva cuando hay empates.
+    for (int i = 1; i < total; i++) {
+        RegistroLote actual_lote = lote[i];
+        int j = i;
+
+        while (j > 0 &&
+               lote[j - 1].llegada > actual_lote.llegada) {
+
+            lote[j] = lote[j - 1];
+            j--;
+        }
+
+        lote[j] = actual_lote;
+    }
+
+    // 11. Bloquear la tabla global de procesos.
+    pthread_mutex_lock(&mutex_sistema);
+
+    // Comprobar espacio disponible.
+    if (total > MAX_PROCESOS - num_procesos) {
+        printf("[ERROR]: Capacidad insuficiente. "
+               "Disponibles: %d. Solicitados: %d.\n",
+               MAX_PROCESOS - num_procesos, total);
+
+        pthread_mutex_unlock(&mutex_sistema);
+        return;
+    }
+
+    // Obtener identificadores sin duplicados.
+    int pid_inicial = siguiente_pid_libre();
+
+    if (pid_inicial == 0 ||
+        pid_inicial > INT_MAX - total + 1) {
+
+        printf("[ERROR]: No hay PID suficientes.\n");
+
+        pthread_mutex_unlock(&mutex_sistema);
+        return;
+    }
+
+    // 12. Instanciar los PCB del lote.
+    for (int i = 0; i < total; i++) {
+
+        PCB* p = &procesos[num_procesos++];
+
+        memset(p, 0, sizeof(*p));
+
+        p->pid = pid_inicial + i;
+
+        strcpy(p->nombre, lote[i].nombre);
+
+        p->estado = NUEVO;
+
+        p->burst_inicial = lote[i].burst;
+        p->burst_restante = lote[i].burst;
+
+        p->prioridad = lote[i].prioridad;
+        p->tiempo_llegada = lote[i].llegada;
+
+        p->tiempo_espera = 0;
+        p->tiempo_retorno = -1;
+        p->tiempo_respuesta = -1;
+
+        p->tiempo_inicio = -1;
+        p->tiempo_finalizacion = -1;
+
+        p->ha_iniciado = false;
+        p->orden_listo = 0;
+
+        /*
+         * El motor existente admite los procesos
+         * NUEVO cuando clock_ticks alcanza su
+         * tiempo_llegada.
+         */
+    }
+
+    pthread_mutex_unlock(&mutex_sistema);
+
+    // 13. Confirmar la carga exitosa.
+    printf("[OK]: Se cargaron %d procesos desde '%s'.\n",
+           total, tokens[1]);
+
+    printf("[INFO]: PID asignados: %d al %d.\n",
+           pid_inicial, pid_inicial + total - 1);
 }
 
 // ============================================================================
