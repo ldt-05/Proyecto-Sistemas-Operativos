@@ -13,10 +13,10 @@
 PCB procesos[MAX_PROCESOS];
 int num_procesos = 0;
 bool simulador_activo = true;
-int clock_ticks = 0;
 pthread_mutex_t mutex_sistema;
+// Nota: clock_ticks está definido en src/scheduler.c
 
-int main() {
+int main(void) {
     pthread_t hilo_cli;
 
 #ifdef _WIN32
@@ -29,17 +29,29 @@ int main() {
         return 1;
     }
 
-    // 1. Crear el hilo interactivo de la CLI (Responsabilidad de Luis)
+    // 1. Crear el hilo interactivo de la CLI (Luis)
     if (pthread_create(&hilo_cli, NULL, HiloCLI, NULL) != 0) {
         printf("[ERROR FATAL]: No se pudo crear el hilo CLI.\n");
         pthread_mutex_destroy(&mutex_sistema);
         return 1;
     }
 
-    // (Aquí Renzo conectará su Hilo Motor de CPU en el siguiente módulo)
+    // 2. Crear el hilo del Motor de CPU (Renzo)
+    if (!motor_iniciar()) {
+        printf("[ERROR FATAL]: No se pudo crear el hilo Motor de CPU.\n");
+        pthread_mutex_lock(&mutex_sistema);
+        simulador_activo = false;
+        pthread_mutex_unlock(&mutex_sistema);
+        pthread_join(hilo_cli, NULL);
+        pthread_mutex_destroy(&mutex_sistema);
+        return 1;
+    }
 
     // Esperar a que el hilo CLI termine (cuando el usuario escribe 'exit')
     pthread_join(hilo_cli, NULL);
+
+    // Detener y liberar el motor de CPU
+    motor_finalizar();
 
     // Destrucción limpia de recursos del sistema
     pthread_mutex_destroy(&mutex_sistema);
