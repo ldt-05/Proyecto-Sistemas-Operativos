@@ -23,6 +23,67 @@ static Color color_proceso(int pid) {
     return colores[(unsigned int)pid % 6];
 }
 
+// Busca el nombre del proceso a partir de su PID en el snapshot.
+static const char* nombre_por_pid(const GuiSnapshot* s, int pid) {
+    for (int i = 0; i < s->total_procesos; i++) {
+        if (s->procesos[i].pid == pid) {
+            return s->procesos[i].nombre;
+        }
+    }
+    return NULL;
+}
+
+// Intenta elegir texto y tamaño que quepan dentro del ancho de la barra.
+static bool ajustar_etiqueta_barra(
+    const char* nombre_proc,
+    int pid,
+    float ancho_barra,
+    char* out_texto,
+    size_t out_cap,
+    float* out_size
+) {
+    const float espacio_util = ancho_barra - 4.0f;
+    if (espacio_util <= 10.0f) {
+        return false;
+    }
+
+    const float tamanos[] = {14.0f, 12.0f, 11.0f};
+
+    if (pid == -1) {
+        for (size_t i = 0; i < sizeof(tamanos) / sizeof(tamanos[0]); i++) {
+            if (gui_texto_ancho("IDLE", tamanos[i]) <= espacio_util) {
+                snprintf(out_texto, out_cap, "IDLE");
+                *out_size = tamanos[i];
+                return true;
+            }
+        }
+        return false;
+    }
+
+    if (nombre_proc != NULL && nombre_proc[0] != '\0') {
+        for (size_t i = 0; i < sizeof(tamanos) / sizeof(tamanos[0]); i++) {
+            if (gui_texto_ancho(nombre_proc, tamanos[i]) <= espacio_util) {
+                snprintf(out_texto, out_cap, "%s", nombre_proc);
+                *out_size = tamanos[i];
+                return true;
+            }
+        }
+    }
+
+    // Respaldo con P<pid> si el nombre completo es más ancho que la barra.
+    char pid_txt[24];
+    snprintf(pid_txt, sizeof(pid_txt), "P%d", pid);
+    for (size_t i = 0; i < sizeof(tamanos) / sizeof(tamanos[0]); i++) {
+        if (gui_texto_ancho(pid_txt, tamanos[i]) <= espacio_util) {
+            snprintf(out_texto, out_cap, "%s", pid_txt);
+            *out_size = tamanos[i];
+            return true;
+        }
+    }
+
+    return false;
+}
+
 /*
  * Representa graficamente el historial de CPU.
  *
@@ -70,6 +131,9 @@ void gui_dibujar_gantt(
         (Color){39, 48, 64, 255}
     );
 
+    int hover_idx = -1;
+    Vector2 mouse = GetMousePosition();
+
     // Dibujar los segmentos registrados.
     for (int i = 0; i < s->total_segmentos; i++) {
         const GanttVista* g = &s->gantt[i];
@@ -89,42 +153,82 @@ void gui_dibujar_gantt(
 
         float x = x0 + (desde - inicio) * por_tick;
         float w = (hasta - desde) * por_tick;
+        Rectangle barra = {
+            x,
+            y0 + 3.0f,
+            w,
+            alto - 6.0f
+        };
 
-        DrawRectangle(
-            (int)x,
-            (int)y0 + 3,
-            (int)(w + 0.5f),
-            (int)alto - 6,
-            color_proceso(g->pid)
-        );
+        DrawRectangleRec(barra, color_proceso(g->pid));
 
-        // Mostrar el PID cuando hay espacio suficiente.
-        if (w >= 38) {
-            char nombre[24];
+        if (CheckCollisionPointRec(mouse, barra)) {
+            hover_idx = i;
+            DrawRectangleLinesEx(barra, 2.0f, RAYWHITE);
+        }
 
-            if (g->pid == -1) {
-                snprintf(
-                    nombre,
-                    sizeof(nombre),
-                    "IDLE"
-                );
-            } else {
-                snprintf(
-                    nombre,
-                    sizeof(nombre),
-                    "P%d",
-                    g->pid
-                );
-            }
+        const char* nombre_proc = (g->pid == -1)
+            ? "IDLE"
+            : nombre_por_pid(s, g->pid);
+
+        char etiqueta[MAX_NOMBRE_LEN + 8];
+        float tam_txt = 14.0f;
+
+        if (ajustar_etiqueta_barra(
+                nombre_proc,
+                g->pid,
+                w,
+                etiqueta,
+                sizeof(etiqueta),
+                &tam_txt
+            )) {
+            float tw = gui_texto_ancho(etiqueta, tam_txt);
+            float tx = x + (w - tw) / 2.0f;
+            float ty = y0 + (alto - tam_txt) / 2.0f;
 
             gui_texto(
-                nombre,
-                x + 5.0f,
-                y0 + 14.0f,
-                14.0f,
+                etiqueta,
+                tx,
+                ty,
+                tam_txt,
                 RAYWHITE
             );
         }
+    }
+
+    if (hover_idx >= 0) {
+        const GanttVista* g = &s->gantt[hover_idx];
+        char detalle[96];
+
+        if (g->pid == -1) {
+            snprintf(
+                detalle,
+                sizeof(detalle),
+                "IDLE | Ticks: %d - %d",
+                g->inicio,
+                g->fin
+            );
+        } else {
+            const char* nombre_proc = nombre_por_pid(s, g->pid);
+            snprintf(
+                detalle,
+                sizeof(detalle),
+                "%s (PID %d) | Ticks: %d - %d",
+                nombre_proc != NULL ? nombre_proc : "Proceso",
+                g->pid,
+                g->inicio,
+                g->fin
+            );
+        }
+
+        float dw = gui_texto_ancho(detalle, 15.0f);
+        gui_texto(
+            detalle,
+            area.x + area.width - dw - 22.0f,
+            area.y + 18.0f,
+            15.0f,
+            (Color){132, 196, 214, 255}
+        );
     }
 
     // Dibujar marcas de la escala temporal.
@@ -163,7 +267,7 @@ void gui_dibujar_gantt(
 
     // Leyenda del diagrama.
     gui_texto(
-        "P = PID  |  gris = CPU inactiva  |  ultimos 32 ticks",
+        "Nombre o PID (si es angosto)  |  gris = CPU inactiva  |  ultimos 32 ticks  |  cursor sobre barra: detalle",
         area.x + 18.0f,
         area.y + area.height - 27.0f,
         14.0f,

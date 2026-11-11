@@ -1,10 +1,10 @@
 # Interfaz gráfica del simulador
 
-Módulo de visualización desarrollado con **raylib**. Permite consultar en tiempo real el estado de los procesos, el reloj del simulador y el diagrama de Gantt, manteniendo disponible la interfaz de comandos (CLI).
+Módulo de visualización desarrollado con **raylib**. Permite consultar en tiempo real el estado de los procesos, el reloj del simulador y el diagrama de Gantt, manteniendo disponible la interfaz de comandos (CLI) completamente funcional.
 
 ## Requisitos
 
-Se necesita un compilador de C, `make`, `pkg-config` y la biblioteca de desarrollo de raylib.
+Se necesita un compilador de C (`gcc`), `make`, `pkg-config` y la biblioteca de desarrollo de `raylib`.
 
 ## Compilación y ejecución
 
@@ -19,8 +19,8 @@ make -f gui/Makefile
 
 Al ejecutar el programa se abrirá la ventana gráfica y permanecerá disponible la CLI en la terminal.
 
-La ventana muestra los procesos registrados, sus estados, las ráfagas restantes, los indicadores generales y el historial de ejecución de la CPU.
+La ventana muestra los procesos registrados, sus estados, las ráfagas restantes, los indicadores generales y el historial de ejecución de la CPU en tiempo real.
 
-Los procesos pueden crearse desde la CLI mediante `create`. Una vez integrados los módulos correspondientes, también estarán disponibles `load`, `start`, `pause` y los demás comandos del planificador.
+Todos los comandos del simulador (`create`, `load`, `ps`, `pcb`, `set_sched`, `set_speed`, `start`, `pause`, `gantt`, `stats`, `help`, `exit`) están disponibles desde la CLI mientras la ventana gráfica actualiza el estado automáticamente.
 
 Para cerrar únicamente la ventana, utiliza el botón **Cerrar GUI**. La CLI continuará funcionando hasta ejecutar `exit`.

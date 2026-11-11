@@ -1,6 +1,10 @@
 // Pruebas del motor con hilos reales. Incluye scheduler.c para ver su estado interno.
 // Compilar: gcc tests/test_motor.c -o test_motor.exe -Wall -Wextra -pthread
 #include "../src/scheduler.c"
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 
 PCB procesos[100];
 int num_procesos = 0;
@@ -279,6 +283,10 @@ static void prueba_exit_inmediato(void) {
 }
 
 int main(void) {
+#ifdef _WIN32
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+#endif
     pthread_mutex_init(&mutex_sistema, NULL);
     motor_iniciar();
 

@@ -1,0 +1,5 @@
+*.exe
+*.o
+simulador_so
+test_motor
+gui/simulador_gui

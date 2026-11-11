@@ -5,6 +5,10 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 
 // Estado compartido del simulador.
 PCB procesos[MAX_PROCESOS];
@@ -16,6 +20,12 @@ pthread_mutex_t mutex_sistema;
 
 int main(void) {
     pthread_t hilo_cli;
+
+#ifdef _WIN32
+    // Configurar consola de Windows en UTF-8 para mostrar tildes correctamente.
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+#endif
 
     // Inicializar el mecanismo de sincronizacion.
     if (pthread_mutex_init(&mutex_sistema, NULL) != 0) {
