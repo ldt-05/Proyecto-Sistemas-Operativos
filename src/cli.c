@@ -707,7 +707,7 @@ static void ejecutar_load(int token_count, char* tokens[]) {
 
         p->pid = pid_inicial + i;
 
-        strncpy(p->nombre, lote[i].nombre, MAX_NOMBRE_LEN - 1);
+        memcpy(p->nombre, lote[i].nombre, MAX_NOMBRE_LEN);
         p->nombre[MAX_NOMBRE_LEN - 1] = '\0';
 
         p->estado = NUEVO;

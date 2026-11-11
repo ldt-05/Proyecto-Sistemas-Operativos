@@ -21,6 +21,7 @@ int main(void) {
 
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);  // Soporte de acentos y caracteres UTF-8 en PowerShell / CMD
+    SetConsoleCP(CP_UTF8);
 #endif
 
     // Inicializar el Mutex principal
